@@ -67,7 +67,9 @@ def _init_state() -> None:
         "nl_history": [],
         "insights_cache": None,
         "quality_cache": None,
-        "gemini_user_api_key": "",
+        "gemini_user_api_key": settings.gemini_api_key or "",
+        "ollama_base_url": settings.ollama_base_url,
+        "ollama_model": settings.ollama_model,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -312,41 +314,67 @@ def _sidebar() -> None:
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("LLM")
+    provider_options = ["gemini", "ollama", "none"]
+    current_prov = st.session_state.llm.provider_name
+    if current_prov not in provider_options:
+        current_prov = "gemini"
+
     provider_choice = st.sidebar.selectbox(
         "Provider",
-        options=["gemini", "none", "ollama"],
-        index=["gemini", "none", "ollama"].index(
-            st.session_state.llm.provider_name
-            if st.session_state.llm.provider_name in {"gemini", "none", "ollama"}
-            else "gemini"
-        ),
+        options=provider_options,
+        index=provider_options.index(current_prov),
+        key="sidebar_llm_provider_select",
     )
-    user_api_key = st.session_state.get("gemini_user_api_key", "")
+
     if provider_choice != st.session_state.llm.provider_name:
         st.session_state.llm = LLMService(
             provider=provider_choice,
-            api_key=user_api_key if provider_choice == "gemini" else None,
+            api_key=st.session_state.get("gemini_user_api_key") or None,
+            ollama_base_url=st.session_state.get("ollama_base_url", settings.ollama_base_url),
+            ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
         )
         _refresh_pipeline()
+        st.rerun()
 
-    if provider_choice == "gemini" and not st.session_state.llm.available:
+    if provider_choice == "gemini":
+        saved_key = st.session_state.get("gemini_user_api_key", "")
         input_key = st.sidebar.text_input(
             "Gemini API Key",
             type="password",
-            value=user_api_key,
-            help="Get a free key from https://aistudio.google.com/",
-            key="sidebar_gemini_key",
+            value=saved_key,
+            help="Free key from https://aistudio.google.com/",
+            key="gemini_key_input",
         )
-        if input_key and input_key != user_api_key:
+        if input_key != saved_key:
             st.session_state.gemini_user_api_key = input_key
-            st.session_state.llm = LLMService(provider="gemini", api_key=input_key)
+            st.session_state.llm = LLMService(provider="gemini", api_key=input_key or None)
+            _refresh_pipeline()
+            st.rerun()
+
+    elif provider_choice == "ollama":
+        saved_url = st.session_state.get("ollama_base_url", settings.ollama_base_url)
+        input_url = st.sidebar.text_input(
+            "Ollama Base URL",
+            value=saved_url,
+            help="E.g. http://localhost:11434 (or your public ngrok tunnel URL)",
+            key="ollama_url_input",
+        )
+        if input_url != saved_url:
+            st.session_state.ollama_base_url = input_url
+            st.session_state.llm = LLMService(
+                provider="ollama",
+                ollama_base_url=input_url,
+                ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
+            )
             _refresh_pipeline()
             st.rerun()
 
     if st.sidebar.button("Refresh LLM status"):
         st.session_state.llm = LLMService(
             provider=st.session_state.llm.provider_name,
-            api_key=st.session_state.get("gemini_user_api_key"),
+            api_key=st.session_state.get("gemini_user_api_key") or None,
+            ollama_base_url=st.session_state.get("ollama_base_url", settings.ollama_base_url),
+            ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
         )
         _refresh_pipeline()
         st.rerun()

@@ -26,21 +26,31 @@ class LLMService:
         provider: Optional[str] = None,
         provider_instance: Optional[LLMProvider] = None,
         api_key: Optional[str] = None,
+        ollama_base_url: Optional[str] = None,
+        ollama_model: Optional[str] = None,
     ) -> None:
         self.provider_name = (provider or settings.llm_provider).lower()
         self.api_key = api_key
+        self.ollama_base_url = (ollama_base_url or settings.ollama_base_url).rstrip("/")
+        self.ollama_model = ollama_model or settings.ollama_model
         self._provider = provider_instance or self._build_provider(
-            self.provider_name, api_key=api_key
+            self.provider_name,
+            api_key=api_key,
+            ollama_base_url=self.ollama_base_url,
+            ollama_model=self.ollama_model,
         )
 
     @staticmethod
     def _build_provider(
-        name: str, api_key: Optional[str] = None
+        name: str,
+        api_key: Optional[str] = None,
+        ollama_base_url: Optional[str] = None,
+        ollama_model: Optional[str] = None,
     ) -> Optional[LLMProvider]:
         if name in {"none", "off", "disabled"}:
             return None
         if name == "ollama":
-            return OllamaProvider()
+            return OllamaProvider(base_url=ollama_base_url, model=ollama_model)
         # Default / unknown → Gemini (active provider)
         return GeminiProvider(api_key=api_key)
 
@@ -57,11 +67,13 @@ class LLMService:
         if self._provider is None:
             return "No LLM provider configured."
         if self.provider_name == "ollama":
+            url = getattr(self._provider, "base_url", self.ollama_base_url)
+            model = getattr(self._provider, "model", self.ollama_model)
             if self.available:
-                return f"Ollama ready ({settings.ollama_model})."
+                return f"Ollama ready ({model} at {url})."
             return (
-                f"Ollama not reachable at {settings.ollama_base_url}. "
-                "Set LLM_PROVIDER=gemini and GEMINI_API_KEY in .env or enter it in the sidebar."
+                f"Ollama is not reachable at {url}. "
+                "Ensure Ollama is running (or provide a public tunnel URL on mobile/cloud)."
             )
         if self.provider_name == "gemini" or isinstance(self._provider, GeminiProvider):
             if self.available:
