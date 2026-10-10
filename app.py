@@ -171,7 +171,7 @@ def _render_result_block(result_df: pd.DataFrame, key_prefix: str) -> None:
     chart_type = recommend_chart(result_df) if choice == "auto" else choice
     fig = build_plotly_figure(result_df, chart_type=chart_type)
     if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plotly")
     else:
         st.caption("No chart recommended for this result shape.")
 
@@ -559,7 +559,7 @@ def _tab_insights() -> None:
             st.dataframe(block["table"], use_container_width=True)
             fig = build_plotly_figure(block["table"], chart_type="bar")
             if fig:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="insights_cat_plotly")
             break
 
     for block in insights.get("trends", []):
@@ -568,7 +568,7 @@ def _tab_insights() -> None:
             st.dataframe(block["table"], use_container_width=True)
             fig = build_plotly_figure(block["table"], chart_type="line")
             if fig:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="insights_trend_plotly")
             break
 
 
