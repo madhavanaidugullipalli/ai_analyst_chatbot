@@ -1,8 +1,23 @@
 """Application settings loaded from environment variables."""
 
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    import streamlit as st
+
+    if hasattr(st, "secrets"):
+        for k, v in st.secrets.items():
+            if isinstance(v, (str, int, float, bool)):
+                k_str = str(k)
+                if k_str not in os.environ:
+                    os.environ[k_str] = str(v)
+                if k_str.upper() not in os.environ:
+                    os.environ[k_str.upper()] = str(v)
+except Exception:
+    pass
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

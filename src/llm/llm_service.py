@@ -25,18 +25,24 @@ class LLMService:
         self,
         provider: Optional[str] = None,
         provider_instance: Optional[LLMProvider] = None,
+        api_key: Optional[str] = None,
     ) -> None:
         self.provider_name = (provider or settings.llm_provider).lower()
-        self._provider = provider_instance or self._build_provider(self.provider_name)
+        self.api_key = api_key
+        self._provider = provider_instance or self._build_provider(
+            self.provider_name, api_key=api_key
+        )
 
     @staticmethod
-    def _build_provider(name: str) -> Optional[LLMProvider]:
+    def _build_provider(
+        name: str, api_key: Optional[str] = None
+    ) -> Optional[LLMProvider]:
         if name in {"none", "off", "disabled"}:
             return None
         if name == "ollama":
             return OllamaProvider()
         # Default / unknown → Gemini (active provider)
-        return GeminiProvider()
+        return GeminiProvider(api_key=api_key)
 
     @property
     def available(self) -> bool:
@@ -55,12 +61,12 @@ class LLMService:
                 return f"Ollama ready ({settings.ollama_model})."
             return (
                 f"Ollama not reachable at {settings.ollama_base_url}. "
-                "Set LLM_PROVIDER=gemini and GEMINI_API_KEY in .env."
+                "Set LLM_PROVIDER=gemini and GEMINI_API_KEY in .env or enter it in the sidebar."
             )
         if self.provider_name == "gemini" or isinstance(self._provider, GeminiProvider):
             if self.available:
                 return f"Gemini ready ({settings.gemini_model})."
-            return "GEMINI_API_KEY is missing. Add it to .env."
+            return "GEMINI_API_KEY is missing. Enter it in the sidebar or add it to Streamlit Secrets / .env."
         return f"Provider '{self.provider_name}' is not available."
 
     def complete(self, system: str, user: str) -> LLMResponse:

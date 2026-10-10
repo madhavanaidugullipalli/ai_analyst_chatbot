@@ -67,6 +67,7 @@ def _init_state() -> None:
         "nl_history": [],
         "insights_cache": None,
         "quality_cache": None,
+        "gemini_user_api_key": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -320,12 +321,36 @@ def _sidebar() -> None:
             else "gemini"
         ),
     )
+    user_api_key = st.session_state.get("gemini_user_api_key", "")
     if provider_choice != st.session_state.llm.provider_name:
-        st.session_state.llm = LLMService(provider=provider_choice)
+        st.session_state.llm = LLMService(
+            provider=provider_choice,
+            api_key=user_api_key if provider_choice == "gemini" else None,
+        )
         _refresh_pipeline()
+
+    if provider_choice == "gemini" and not st.session_state.llm.available:
+        input_key = st.sidebar.text_input(
+            "Gemini API Key",
+            type="password",
+            value=user_api_key,
+            help="Get a free key from https://aistudio.google.com/",
+            key="sidebar_gemini_key",
+        )
+        if input_key and input_key != user_api_key:
+            st.session_state.gemini_user_api_key = input_key
+            st.session_state.llm = LLMService(provider="gemini", api_key=input_key)
+            _refresh_pipeline()
+            st.rerun()
+
     if st.sidebar.button("Refresh LLM status"):
-        st.session_state.llm = LLMService(provider=st.session_state.llm.provider_name)
+        st.session_state.llm = LLMService(
+            provider=st.session_state.llm.provider_name,
+            api_key=st.session_state.get("gemini_user_api_key"),
+        )
         _refresh_pipeline()
+        st.rerun()
+
     llm = st.session_state.llm
     if llm.available:
         st.sidebar.success(llm.status_message)
