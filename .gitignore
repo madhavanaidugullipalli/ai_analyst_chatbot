@@ -1,0 +1,52 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.cursor/
+
+# Application data (user uploads — keep sample only)
+data/uploads/
+data/reports/
+data/app.db
+data/app.db-*
+!data/sample_sales.csv
+logs/*
+!logs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local DB
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+credentials.json
+*.log
+
+# Test & coverage output
+pytest_out.txt
+.coverage
+htmlcov/
+
+# Nested clone
+ai_analyst_chatbot/
