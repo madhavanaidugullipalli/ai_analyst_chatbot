@@ -67,7 +67,7 @@ def _init_state() -> None:
         "nl_history": [],
         "insights_cache": None,
         "quality_cache": None,
-        "gemini_user_api_key": settings.gemini_api_key or "",
+        "custom_gemini_key": "",
         "ollama_base_url": settings.ollama_base_url,
         "ollama_model": settings.ollama_model,
     }
@@ -319,71 +319,75 @@ def _sidebar() -> None:
     if current_prov not in provider_options:
         current_prov = "gemini"
 
-    provider_choice = st.sidebar.selectbox(
+    def _on_provider_change() -> None:
+        chosen = st.session_state.sidebar_llm_provider_select
+        st.session_state.llm = LLMService(
+            provider=chosen,
+            api_key=st.session_state.get("custom_gemini_key") or None,
+            ollama_base_url=st.session_state.get("ollama_base_url", settings.ollama_base_url),
+            ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
+        )
+        _refresh_pipeline()
+
+    st.sidebar.selectbox(
         "Provider",
         options=provider_options,
         index=provider_options.index(current_prov),
         key="sidebar_llm_provider_select",
+        on_change=_on_provider_change,
     )
 
-    if provider_choice != st.session_state.llm.provider_name:
-        st.session_state.llm = LLMService(
-            provider=provider_choice,
-            api_key=st.session_state.get("gemini_user_api_key") or None,
-            ollama_base_url=st.session_state.get("ollama_base_url", settings.ollama_base_url),
-            ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
-        )
-        _refresh_pipeline()
-        st.rerun()
-
-    if provider_choice == "gemini":
-        saved_key = st.session_state.get("gemini_user_api_key", "")
-        input_key = st.sidebar.text_input(
-            "Gemini API Key",
-            type="password",
-            value=saved_key,
-            help="Free key from https://aistudio.google.com/",
-            key="gemini_key_input",
-        )
-        if input_key != saved_key:
-            st.session_state.gemini_user_api_key = input_key
-            st.session_state.llm = LLMService(provider="gemini", api_key=input_key or None)
-            _refresh_pipeline()
-            st.rerun()
-
-    elif provider_choice == "ollama":
-        saved_url = st.session_state.get("ollama_base_url", settings.ollama_base_url)
-        input_url = st.sidebar.text_input(
-            "Ollama Base URL",
-            value=saved_url,
-            help="E.g. http://localhost:11434 (or your public ngrok tunnel URL)",
-            key="ollama_url_input",
-        )
-        if input_url != saved_url:
-            st.session_state.ollama_base_url = input_url
-            st.session_state.llm = LLMService(
-                provider="ollama",
-                ollama_base_url=input_url,
-                ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
-            )
-            _refresh_pipeline()
-            st.rerun()
-
-    if st.sidebar.button("Refresh LLM status"):
-        st.session_state.llm = LLMService(
-            provider=st.session_state.llm.provider_name,
-            api_key=st.session_state.get("gemini_user_api_key") or None,
-            ollama_base_url=st.session_state.get("ollama_base_url", settings.ollama_base_url),
-            ollama_model=st.session_state.get("ollama_model", settings.ollama_model),
-        )
-        _refresh_pipeline()
-        st.rerun()
-
     llm = st.session_state.llm
-    if llm.available:
-        st.sidebar.success(llm.status_message)
+
+    if llm.provider_name == "gemini":
+        if llm.available:
+            st.sidebar.success(llm.status_message)
+            with st.sidebar.expander("⚙️ Custom API Key (optional)", expanded=False):
+                st.caption("Active key is configured. Enter a personal key only to override.")
+                custom_input = st.text_input(
+                    "Override Key",
+                    type="password",
+                    placeholder="Enter custom key...",
+                    key="gemini_override_input",
+                )
+                if custom_input and st.button("Apply Key", key="btn_apply_gemini_key"):
+                    st.session_state.custom_gemini_key = custom_input
+                    st.session_state.llm = LLMService(provider="gemini", api_key=custom_input)
+                    _refresh_pipeline()
+                    st.rerun()
+        else:
+            st.sidebar.warning(llm.status_message)
+            custom_input = st.sidebar.text_input(
+                "Gemini API Key",
+                type="password",
+                placeholder="Paste key here...",
+                key="gemini_required_input",
+            )
+            if custom_input:
+                st.session_state.custom_gemini_key = custom_input
+                st.session_state.llm = LLMService(provider="gemini", api_key=custom_input)
+                _refresh_pipeline()
+                st.rerun()
+
+    elif llm.provider_name == "ollama":
+        if llm.available:
+            st.sidebar.success(llm.status_message)
+        else:
+            st.sidebar.warning(llm.status_message)
+        with st.sidebar.expander("⚙️ Ollama Settings", expanded=False):
+            url_input = st.text_input(
+                "Ollama Base URL",
+                value=st.session_state.get("ollama_base_url", settings.ollama_base_url),
+                key="ollama_base_url_input",
+            )
+            if url_input != st.session_state.get("ollama_base_url", settings.ollama_base_url):
+                st.session_state.ollama_base_url = url_input
+                st.session_state.llm = LLMService(provider="ollama", ollama_base_url=url_input)
+                _refresh_pipeline()
+                st.rerun()
+
     else:
-        st.sidebar.warning(llm.status_message)
+        st.sidebar.info("LLM is disabled. You can run manual SQL in the Query tab.")
 
 
 def _tab_ask() -> None:
