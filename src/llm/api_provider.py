@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 
-FALLBACK_MODELS = ("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash")
+FALLBACK_MODELS = ("gemini-3.5-flash", "gemini-3.5-flash-lite")
 
 
 def resolve_gemini_api_key(explicit_key: str | None = None) -> str:
@@ -77,11 +77,14 @@ class GeminiProvider(LLMProvider):
         self,
         api_key: str | None = None,
         model: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 20.0,
     ) -> None:
         self._explicit_key = api_key
-        self.model = model or getattr(settings, "gemini_model", "gemini-3.5-flash")
-        self.timeout = timeout
+        raw_model = model or getattr(settings, "gemini_model", "gemini-3.5-flash")
+        if raw_model in {"gemini-3.8-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"}:
+            raw_model = "gemini-3.5-flash"
+        self.model = raw_model
+        self.timeout = min(timeout, 20.0)
         self._client = None
 
     @property
@@ -204,34 +207,34 @@ def _format_gemini_error(exc: Exception) -> str:
     code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
     status = str(getattr(exc, "status", "") or "")
 
+    if "resource_exhausted" in lower or "quota" in lower:
+        return (
+            "Gemini API Quota Exceeded (429 RESOURCE_EXHAUSTED rate limit). "
+            f"Your Google account's rate limit was reached. Details: {message[:180]}"
+        )
     if (
         code in {429, 503, 504}
         or "429" in message
         or "503" in message
         or "504" in message
-        or "resource_exhausted" in lower
         or "high demand" in lower
         or "unavailable" in lower
         or "deadline" in lower
-        or "rate" in lower
     ):
         return (
-            "Gemini is temporarily unavailable (rate limit or high demand). "
-            "Wait a moment and try again, or check your API quota."
+            f"Gemini server busy or timed out (Code {code or '504'}). "
+            f"Details: {message[:180]}"
         )
     if code in {401, 403} or "api key" in lower or "permission" in lower or "unauthenticated" in lower:
         return (
             "Gemini authentication failed. Check that GEMINI_API_KEY is valid "
-            "and enabled for the Gemini API."
+            f"and enabled for the Gemini API. Details: {message[:180]}"
         )
     if code == 404 or "not found" in lower:
-        return (
-            f"Gemini model not found. Check GEMINI_MODEL in .env "
-            f"(current setting may be unsupported). Details: {message[:300]}"
-        )
+        return f"Gemini model not found (404). Details: {message[:180]}"
     if status:
-        return f"Gemini API error ({status}): {message[:400]}"
-    return f"Gemini API error: {message[:400]}"
+        return f"Gemini API error ({status}): {message[:250]}"
+    return f"Gemini API error: {message[:250]}"
 
 
 # Alias used by docs / imports
