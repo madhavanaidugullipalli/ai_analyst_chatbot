@@ -68,6 +68,8 @@ def _init_state() -> None:
         "insights_cache": None,
         "quality_cache": None,
         "custom_gemini_key": "",
+        "key_feedback": None,
+        "show_key_expander": False,
         "ollama_base_url": settings.ollama_base_url,
         "ollama_model": settings.ollama_model,
     }
@@ -340,34 +342,81 @@ def _sidebar() -> None:
     llm = st.session_state.llm
 
     if llm.provider_name == "gemini":
+        feedback = st.session_state.get("key_feedback")
+        if feedback:
+            level, text = feedback
+            if level == "success":
+                st.sidebar.success(text)
+            elif level == "error":
+                st.sidebar.error(text)
+
         if llm.available:
             st.sidebar.success(llm.status_message)
-            with st.sidebar.expander("⚙️ Custom API Key (optional)", expanded=False):
-                st.caption("Active key is configured. Enter a personal key only to override.")
+            expander_expanded = bool(st.session_state.get("show_key_expander", False))
+            with st.sidebar.expander("⚙️ Customize API Key", expanded=expander_expanded):
+                st.caption("Active key is working. Paste a new key below to test and switch.")
                 custom_input = st.text_input(
-                    "Override Key",
+                    "Gemini API Key",
                     type="password",
-                    placeholder="Enter custom key...",
-                    key="gemini_override_input",
+                    placeholder="AQ.Ab8... or AIzaSy...",
+                    key="gemini_custom_key_input",
                 )
-                if custom_input and st.button("Apply Key", key="btn_apply_gemini_key"):
-                    st.session_state.custom_gemini_key = custom_input
-                    st.session_state.llm = LLMService(provider="gemini", api_key=custom_input)
-                    _refresh_pipeline()
-                    st.rerun()
+                col_apply, col_clear = st.columns([1, 1])
+                if col_apply.button("Apply & Test", key="btn_apply_gemini", type="primary"):
+                    clean_key = (custom_input or "").strip()
+                    if not clean_key:
+                        st.session_state.key_feedback = ("error", "Please enter a key before applying.")
+                        st.session_state.show_key_expander = True
+                        st.rerun()
+                    else:
+                        with st.spinner("Verifying API key with Google Gemini..."):
+                            temp_llm = LLMService(provider="gemini", api_key=clean_key)
+                            ok, msg = temp_llm.test_connection()
+                        if ok:
+                            st.session_state.custom_gemini_key = clean_key
+                            st.session_state.llm = temp_llm
+                            _refresh_pipeline()
+                            st.session_state.key_feedback = ("success", f"✅ {msg}")
+                            st.session_state.show_key_expander = False
+                            st.rerun()
+                        else:
+                            st.session_state.key_feedback = ("error", f"❌ {msg}")
+                            st.session_state.show_key_expander = True
+                            st.rerun()
+
+                if st.session_state.get("custom_gemini_key"):
+                    if col_clear.button("Reset Default", key="btn_reset_gemini"):
+                        st.session_state.custom_gemini_key = ""
+                        st.session_state.llm = LLMService(provider="gemini")
+                        _refresh_pipeline()
+                        st.session_state.key_feedback = ("success", "Reverted to default/secrets key.")
+                        st.session_state.show_key_expander = False
+                        st.rerun()
         else:
             st.sidebar.warning(llm.status_message)
+            st.sidebar.markdown("**Enter your Gemini API key to activate:**")
             custom_input = st.sidebar.text_input(
                 "Gemini API Key",
                 type="password",
-                placeholder="Paste key here...",
-                key="gemini_required_input",
+                placeholder="AQ.Ab8... or AIzaSy...",
+                key="gemini_required_key_input",
             )
-            if custom_input:
-                st.session_state.custom_gemini_key = custom_input
-                st.session_state.llm = LLMService(provider="gemini", api_key=custom_input)
-                _refresh_pipeline()
-                st.rerun()
+            if st.sidebar.button("Apply & Test Key", key="btn_apply_required_gemini", type="primary"):
+                clean_key = (custom_input or "").strip()
+                if not clean_key:
+                    st.sidebar.error("Please paste an API key first.")
+                else:
+                    with st.spinner("Testing key with Google Gemini..."):
+                        temp_llm = LLMService(provider="gemini", api_key=clean_key)
+                        ok, msg = temp_llm.test_connection()
+                    if ok:
+                        st.session_state.custom_gemini_key = clean_key
+                        st.session_state.llm = temp_llm
+                        _refresh_pipeline()
+                        st.session_state.key_feedback = ("success", f"✅ {msg}")
+                        st.rerun()
+                    else:
+                        st.sidebar.error(f"❌ {msg}")
 
     elif llm.provider_name == "ollama":
         if llm.available:

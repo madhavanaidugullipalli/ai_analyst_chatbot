@@ -81,6 +81,11 @@ class LLMService:
             return "GEMINI_API_KEY is missing. Enter it in the sidebar or add it to Streamlit Secrets / .env."
         return f"Provider '{self.provider_name}' is not available."
 
+    def test_connection(self) -> tuple[bool, str]:
+        if self._provider and hasattr(self._provider, "test_connection"):
+            return self._provider.test_connection()
+        return self.available, self.status_message
+
     def complete(self, system: str, user: str) -> LLMResponse:
         if not self.available or self._provider is None:
             raise LLMUnavailableError(self.status_message)

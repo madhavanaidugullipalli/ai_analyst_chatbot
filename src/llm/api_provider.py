@@ -6,6 +6,13 @@ from config.settings import settings
 from src.llm.base import LLMProvider, LLMResponse
 
 
+import os
+import re
+from pathlib import Path
+
+FALLBACK_MODELS = ("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash")
+
+
 def resolve_gemini_api_key(explicit_key: str | None = None) -> str:
     """Resolve Gemini API key from explicit parameter, Streamlit secrets, env, or settings."""
     if explicit_key is not None:
@@ -37,12 +44,28 @@ def resolve_gemini_api_key(explicit_key: str | None = None) -> str:
         return settings.gemini_api_key.strip()
 
     # 3. Check environment variables
-    import os
-
     for env_var in ("GEMINI_API_KEY", "gemini_api_key", "GOOGLE_API_KEY", "google_api_key"):
         val = os.environ.get(env_var)
         if val and val.strip():
             return val.strip()
+
+    # 4. Fallback: check .streamlit/secrets.toml directly in case TOML parsing failed
+    for secrets_path in (
+        Path(".streamlit/secrets.toml"),
+        Path.home() / ".streamlit" / "secrets.toml",
+    ):
+        try:
+            if secrets_path.is_file():
+                content = secrets_path.read_text(encoding="utf-8")
+                match = re.search(
+                    r'(?:GEMINI_API_KEY|GOOGLE_API_KEY|api_key)\s*=\s*["\']?([a-zA-Z0-9_\-\.]+)',
+                    content,
+                    re.IGNORECASE,
+                )
+                if match:
+                    return match.group(1).strip()
+        except Exception:
+            pass
 
     return ""
 
@@ -54,10 +77,10 @@ class GeminiProvider(LLMProvider):
         self,
         api_key: str | None = None,
         model: str | None = None,
-        timeout: float = 90.0,
+        timeout: float = 60.0,
     ) -> None:
         self._explicit_key = api_key
-        self.model = model or getattr(settings, "gemini_model", "gemini-3.8-flash")
+        self.model = model or getattr(settings, "gemini_model", "gemini-3.5-flash")
         self.timeout = timeout
         self._client = None
 
@@ -89,6 +112,34 @@ class GeminiProvider(LLMProvider):
             )
         return self._client
 
+    def test_connection(self) -> tuple[bool, str]:
+        """Test API key validity with a lightweight prompt. Returns (success, message)."""
+        if not self.is_available():
+            return False, "Gemini API key is not configured."
+        try:
+            client = self._get_client()
+            models_to_try = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+            last_err = None
+            for m in models_to_try:
+                try:
+                    resp = client.models.generate_content(
+                        model=m,
+                        contents="ping",
+                    )
+                    if getattr(resp, "text", None):
+                        return True, f"Key verified and working ({m})."
+                except Exception as inner:
+                    last_err = inner
+                    code = getattr(inner, "code", None) or getattr(inner, "status_code", None)
+                    if code in {401, 403} or "unauthenticated" in str(inner).lower():
+                        return False, _format_gemini_error(inner)
+                    continue
+            if last_err:
+                return False, _format_gemini_error(last_err)
+            return True, "Key verified."
+        except Exception as exc:
+            return False, _format_gemini_error(exc)
+
     def complete(self, system: str, user: str) -> LLMResponse:
         if not self.is_available():
             raise RuntimeError(
@@ -102,26 +153,37 @@ class GeminiProvider(LLMProvider):
                 "google-genai is not installed. Run: pip install google-genai"
             ) from exc
 
-        try:
-            client = self._get_client()
-            response = client.models.generate_content(
-                model=self.model,
-                contents=user,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=0.1,
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001 — map SDK/network errors for the UI
-            raise RuntimeError(_format_gemini_error(exc)) from exc
+        client = self._get_client()
+        models_to_try = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        last_exception = None
 
-        text = (getattr(response, "text", None) or "").strip()
-        if not text:
-            # Fallback: assemble from candidates if .text is empty
-            text = _extract_text(response)
-        if not text:
-            raise RuntimeError("Gemini returned an empty response.")
-        return LLMResponse(text=text, model=self.model, provider=self.name)
+        for attempt_model in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=attempt_model,
+                    contents=user,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        temperature=0.1,
+                    ),
+                )
+                text = (getattr(response, "text", None) or "").strip()
+                if not text:
+                    text = _extract_text(response)
+                if text:
+                    return LLMResponse(text=text, model=attempt_model, provider=self.name)
+            except Exception as exc:
+                last_exception = exc
+                err_str = str(exc).lower()
+                # If authentication failed, no point retrying other models
+                if "401" in err_str or "403" in err_str or "unauthenticated" in err_str:
+                    raise RuntimeError(_format_gemini_error(exc)) from exc
+                # For 503, 504, 404, try next fallback model
+                continue
+
+        if last_exception:
+            raise RuntimeError(_format_gemini_error(last_exception)) from last_exception
+        raise RuntimeError("Gemini returned an empty response.")
 
 
 def _extract_text(response) -> str:
